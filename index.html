@@ -1,0 +1,804 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DPT Control</title>
+<!-- Double Pulse Test control panel for DPT_F28P55x.slx. Open in Chrome or Edge (Web Serial). -->
+<!-- Protocol: PC->DSP 'C'+[ctrl,t1,gap,t2,N,seq,chk]+'E' ; DSP->PC 'DT'+[status,adc0..4,chk], uint16 LE, 230400 8N1 -->
+<!-- ctrl = mode | fire<<8 | sineOn<<9 | sineOnly<<10 ; status = mode | nack<<2 | (bursts mod 16)<<3 | sineOn<<7 | seq<<8 -->
+<!-- sineOnly commands carry the ePWM3 TBPRD (3750..15000 = 20..5 kHz) in t1; bits 12..15 of adc0..3 report it back -->
+
+
+<style>
+:root{
+  color-scheme: light;
+  --page:#f9f9f7; --surface:#fcfcfb; --surface-2:#f3f2ee; --border:rgba(11,11,11,0.10); --border-strong:rgba(11,11,11,0.18);
+  --text:#0b0b0b; --text-2:#52514e; --muted:#898781; --grid:#e1e0d9; --axis:#c3c2b7;
+  --accent:#2a78d6; --accent-ink:#ffffff;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4;
+  --good:#0ca30c; --good-ink:#006300; --warning:#fab219; --critical:#d03b3b; --critical-ink:#b42d2d;
+  --pulse1:#2a78d6; --pulse2:#eb6834; --pulseor:#52514e;
+  --shadow:0 1px 2px rgba(0,0,0,.05);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --page:#0d0d0d; --surface:#1a1a19; --surface-2:#232321; --border:rgba(255,255,255,0.10); --border-strong:rgba(255,255,255,0.18);
+    --text:#ffffff; --text-2:#c3c2b7; --muted:#898781; --grid:#2c2c2a; --axis:#383835;
+    --accent:#3987e5; --accent-ink:#ffffff;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181;
+    --good-ink:#0ca30c; --critical-ink:#e66767;
+    --pulse1:#3987e5; --pulse2:#d95926; --pulseor:#c3c2b7;
+    --shadow:none;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --page:#0d0d0d; --surface:#1a1a19; --surface-2:#232321; --border:rgba(255,255,255,0.10); --border-strong:rgba(255,255,255,0.18);
+  --text:#ffffff; --text-2:#c3c2b7; --muted:#898781; --grid:#2c2c2a; --axis:#383835;
+  --accent:#3987e5; --accent-ink:#ffffff;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181;
+  --good-ink:#0ca30c; --critical-ink:#e66767;
+  --pulse1:#3987e5; --pulse2:#d95926; --pulseor:#c3c2b7;
+  --shadow:none;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--page);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+button,input,select{font:inherit;color:inherit}
+header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 20px;border-bottom:1px solid var(--border);background:var(--surface)}
+header h1{font-size:16px;font-weight:600;margin:0}
+header .sub{color:var(--muted);font-size:13px}
+header .spacer{flex:1}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--border-strong);color:var(--text-2);white-space:nowrap}
+.pill .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.pill.ok .dot{background:var(--good)} .pill.ok{color:var(--good-ink)}
+.pill.armed{background:var(--critical);border-color:var(--critical);color:#fff} .pill.armed .dot{background:#fff}
+.pill.warn .dot{background:var(--warning)}
+main{display:grid;grid-template-columns:minmax(320px,380px) minmax(0,1fr);gap:16px;padding:16px 20px;max-width:1700px;margin:0 auto}
+@media (max-width:900px){main{grid-template-columns:minmax(0,1fr);padding:12px 16px} header{padding:10px 16px}}
+.col{display:flex;flex-direction:column;gap:16px;min-width:0}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);min-width:0}
+.card > h2{font-size:13px;font-weight:600;margin:0;padding:12px 14px 0;color:var(--text-2);text-transform:uppercase;letter-spacing:.04em}
+.card .body{padding:12px 14px 14px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{border:1px solid var(--border-strong);background:var(--surface);border-radius:8px;padding:7px 12px;cursor:pointer;font-weight:500;min-height:34px}
+.btn:hover:not(:disabled){background:var(--surface-2)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.primary:hover:not(:disabled){filter:brightness(1.08);background:var(--accent)}
+.btn.danger{background:var(--critical);border-color:var(--critical);color:#fff}
+.btn.danger:hover:not(:disabled){filter:brightness(1.08);background:var(--critical)}
+.btn.fire{background:transparent;border:2px solid var(--critical);color:var(--critical-ink);font-weight:700}
+.btn.fire:hover:not(:disabled){background:var(--critical);color:#fff}
+.btn.wide{flex:1}
+select,input[type=number],input[type=text]{border:1px solid var(--border-strong);background:var(--surface);border-radius:6px;padding:6px 8px;min-height:32px}
+input[type=number]{width:100%;font-variant-numeric:tabular-nums}
+.seg{display:inline-flex;border:1px solid var(--border-strong);border-radius:8px;overflow:hidden;width:100%}
+.seg button{flex:1;border:0;background:transparent;padding:7px 6px;cursor:pointer;font-weight:500;border-right:1px solid var(--border)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed=true]{background:var(--accent);color:var(--accent-ink)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}
+.field label{display:block;font-size:12px;color:var(--text-2);margin-bottom:3px}
+.field .hint{font-size:11.5px;color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums;min-height:16px}
+.field.bad input{border-color:var(--critical)}
+.field.bad .hint{color:var(--critical-ink)}
+.msg{font-size:12.5px;padding:8px 10px;border-radius:8px;background:var(--surface-2);color:var(--text-2);margin-top:10px}
+.msg.err{color:var(--critical-ink)} .msg.ok{color:var(--good-ink)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13px}
+.kv dt{color:var(--text-2)} .kv dd{margin:0;text-align:right;font-variant-numeric:tabular-nums;font-weight:500}
+svg text{font:11px system-ui,-apple-system,"Segoe UI",sans-serif;fill:var(--text-2)}
+.chartwrap{position:relative;height:clamp(320px,52vh,640px)}
+canvas#chart{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair}
+.tooltip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border-strong);border-radius:8px;padding:8px 10px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.12);min-width:150px;display:none;z-index:2}
+.tooltip .t{color:var(--text-2);margin-bottom:4px;font-variant-numeric:tabular-nums}
+.tooltip .r{display:flex;align-items:center;gap:6px;justify-content:space-between;font-variant-numeric:tabular-nums}
+.tooltip .r span:first-child{display:flex;align-items:center;gap:6px;color:var(--text-2)}
+.sw{width:10px;height:10px;border-radius:3px;display:inline-block;flex:none}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px;color:var(--text-2)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.overlay-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;pointer-events:none;text-align:center;padding:20px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{font-weight:600;color:var(--text-2);text-align:left;padding:6px 6px;border-bottom:1px solid var(--border);white-space:nowrap;font-size:12px}
+td{padding:5px 6px;border-bottom:1px solid var(--border);vertical-align:middle}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td input[type=text]{width:100%;min-width:70px} td input[type=number]{width:80px}
+.tablewrap{overflow-x:auto}
+#log{font:12px ui-monospace,SFMono-Regular,Consolas,monospace;max-height:180px;overflow:auto;background:var(--surface-2);border-radius:6px;padding:8px;white-space:pre-wrap;color:var(--text-2)}
+details summary{cursor:pointer;font-size:13px;color:var(--text-2);font-weight:600}
+.banner{margin:12px 20px 0;padding:10px 14px;border-radius:8px;border:1px solid var(--critical);color:var(--critical-ink);background:var(--surface);display:none;font-size:13px}
+.small{font-size:12px;color:var(--muted)}
+.chk{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-2);cursor:pointer}
+kbd{font:11px ui-monospace,Consolas,monospace;border:1px solid var(--border-strong);border-radius:4px;padding:0 4px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Double Pulse Test Control</h1>
+  <span class="sub">LAUNCHXL-F28P55X · SCI-A over USB</span>
+  <span class="spacer"></span>
+  <span id="pillLink" class="pill"><span class="dot"></span><span id="pillLinkTxt">Disconnected</span></span>
+  <span id="pillMode" class="pill"><span class="dot"></span><span id="pillModeTxt">Outputs: —</span></span>
+  <span id="pillSine" class="pill"><span class="dot"></span><span>Sine PWM: —</span></span>
+  <button id="themeBtn" class="btn" title="Toggle light/dark">Theme</button>
+</header>
+<div id="noSerial" class="banner">This browser has no Web Serial support. Open this file in <b>Google Chrome</b> or <b>Microsoft Edge</b> (desktop). You can still try the interface with <b>Demo</b>.</div>
+
+<main>
+<div class="col">
+  <!-- Connection -->
+  <section class="card">
+    <h2>Connection</h2>
+    <div class="body">
+      <div class="row">
+        <select id="baud" aria-label="Baud rate">
+          <option>115200</option><option selected>230400</option><option>460800</option>
+        </select>
+        <button id="connectBtn" class="btn primary wide">Connect…</button>
+        <button id="demoBtn" class="btn" title="Simulated board, no hardware needed">Demo</button>
+      </div>
+      <label class="chk" style="margin-top:10px"><input type="checkbox" id="stopOnDisc" checked> Turn outputs off when disconnecting</label>
+      <p class="small" style="margin:8px 0 0">Pick the <b>XDS110 Class Application/User UART</b> port. The baud rate must match <code>DPT_BAUD</code> in <code>dpt_params.m</code> (230400).</p>
+    </div>
+  </section>
+
+  <!-- Pulse settings -->
+  <section class="card">
+    <h2>Double pulse</h2>
+    <div class="body">
+      <div class="field" style="margin-bottom:12px">
+        <label>Mode</label>
+        <div class="seg" role="group" aria-label="Mode">
+          <button data-mode="0" aria-pressed="true">Off</button>
+          <button data-mode="2" aria-pressed="false">Single shot</button>
+          <button data-mode="1" aria-pressed="false">Continuous</button>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="field" id="f_t1"><label for="t1">Pulse 1 width t1 (µs)</label><input id="t1" type="number" step="0.1" min="0.1" value="5"><div class="hint"></div></div>
+        <div class="field" id="f_gap"><label for="gap">Off time (gap) (µs)</label><input id="gap" type="number" step="0.1" min="0.1" value="2"><div class="hint"></div></div>
+        <div class="field" id="f_t2"><label for="t2">Pulse 2 width t2 (µs)</label><input id="t2" type="number" step="0.1" min="0.1" value="2"><div class="hint"></div></div>
+        <div class="field" id="f_rep"><label for="rep">Repeat interval (ms)</label><input id="rep" type="number" step="0.4" min="0.4" value="100"><div class="hint"></div></div>
+      </div>
+      <svg id="timing" viewBox="0 0 340 132" width="100%" role="img" aria-label="Timing diagram of the double pulse" style="margin-top:10px"></svg>
+      <div class="row" style="margin-top:6px">
+        <button id="applyBtn" class="btn primary wide" disabled>Apply settings</button>
+        <button id="fireBtn" class="btn fire wide" disabled title="Fire one double pulse (single-shot mode)">FIRE ⚡</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="stopBtn" class="btn danger wide" disabled>STOP – outputs off <kbd style="border-color:rgba(255,255,255,.6)">Esc</kbd></button>
+      </div>
+      <div id="cmdMsg" class="msg">Connect to the board, set the timing, then <b>Apply</b>. The board always starts with the outputs off.</div>
+    </div>
+  </section>
+
+  <!-- Sine PWM -->
+  <section class="card">
+    <h2>Sine PWM</h2>
+    <div class="body">
+      <div class="field" id="f_fsw" style="margin-bottom:10px"><label for="fsw">Switching frequency (kHz, 5 – 20)</label><input id="fsw" type="number" step="0.1" min="5" max="20" value="20"><div class="hint"></div></div>
+      <div class="row">
+        <button id="fswBtn" class="btn wide" disabled title="Send the switching frequency without changing on/off">Apply frequency</button>
+        <button id="sineBtn" class="btn primary wide" disabled>Enable sine PWM</button>
+      </div>
+      <p class="small" style="margin:8px 0 0">Complementary outputs ePWM3A (GPIO4) and ePWM3B (GPIO5) with 0.5 µs dead time at every frequency. The frequency can be changed while running; it switches at a carrier-period boundary. <b>Enable</b> also sends the frequency in the box. Modulation index and fundamental are <code>SINE_M</code> and <code>SINE_F0</code> in <code>dpt_params.m</code>. <b>STOP</b> also turns the sine PWM off. The board always starts with it off at 20 kHz.</p>
+    </div>
+  </section>
+
+  <!-- Status -->
+  <section class="card">
+    <h2>Board status</h2>
+    <div class="body">
+      <dl class="kv" style="margin:0">
+        <dt>Output mode (on DSP)</dt><dd id="stMode">—</dd>
+        <dt>Sine PWM (on DSP)</dt><dd id="stSine">—</dd>
+        <dt>Switching frequency (on DSP)</dt><dd id="stFsw">—</dd>
+        <dt>Bursts fired (this session)</dt><dd id="stBursts">0</dd>
+        <dt>Last command</dt><dd id="stAck">—</dd>
+        <dt>Telemetry rate</dt><dd id="stRate">—</dd>
+        <dt>Bad frames</dt><dd id="stBad">0</dd>
+        <dt>Bytes received</dt><dd id="stBytes">—</dd>
+      </dl>
+      <details style="margin-top:12px"><summary>Log</summary><div id="log"></div></details>
+    </div>
+  </section>
+</div>
+
+<div class="col">
+  <!-- Waveforms -->
+  <section class="card">
+    <h2>ADC waveforms</h2>
+    <div class="body">
+      <div class="row" style="margin-bottom:10px">
+        <div class="seg" style="width:auto" role="group" aria-label="View">
+          <button data-view="stack" aria-pressed="true">Stacked</button>
+          <button data-view="overlay" aria-pressed="false" title="All channels on one axis, raw pin voltage 0–3.3 V">Overlay</button>
+        </div>
+        <select id="win" aria-label="Time window">
+          <option value="0.5">0.5 s</option><option value="1">1 s</option><option value="2" selected>2 s</option>
+          <option value="5">5 s</option><option value="10">10 s</option><option value="30">30 s</option><option value="60">60 s</option>
+        </select>
+        <button id="pauseBtn" class="btn">Pause</button>
+        <button id="clearBtn" class="btn">Clear</button>
+        <button id="csvBtn" class="btn">Save CSV</button>
+        <label class="chk" title="Freeze the plot shortly after each fired burst"><input type="checkbox" id="holdOnFire"> Hold after fire</label>
+        <span class="spacer" style="flex:1"></span>
+        <div class="legend" id="legend"></div>
+      </div>
+      <div class="chartwrap" id="chartwrap">
+        <canvas id="chart"></canvas>
+        <div class="tooltip" id="tip"></div>
+        <div class="overlay-msg" id="chartMsg">No data yet — connect to the board or press Demo.</div>
+      </div>
+      <p class="small" style="margin:8px 0 0">ADC-A sampled at 2.5 kHz, averaged over 2 ms and streamed at 500 S/s per channel. Dashed vertical lines mark fired bursts.</p>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Channels</h2>
+    <div class="body tablewrap">
+      <table id="chTable">
+        <thead><tr><th>Show</th><th>Pin</th><th>Name</th><th>Gain</th><th>Offset</th><th>Unit</th><th class="num">Now</th><th class="num">Min</th><th class="num">Max</th><th class="num">Mean</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="small" style="margin:8px 0 0">Value = pin voltage × gain + offset (e.g. a 100:1 divider on the DC bus → gain 100, unit V). Min / max / mean cover the visible window. Settings are remembered in this browser.</p>
+    </div>
+  </section>
+</div>
+</main>
+
+<script>
+"use strict";
+/* ===================== constants (must match the Simulink model) ===================== */
+const TBCLK = 150e6;            // ePWM time-base clock
+const PRD = 60000;              // ePWM period counts (400 us)
+const TWIN_MS = 0.4;            // ePWM period in ms (repeat-interval resolution)
+const MAX_SUM = PRD - 150;      // t1+gap+t2 limit in counts (DSP check)
+const MIN_CNT = 15;             // 100 ns minimum per segment (DSP check)
+const FRAME_DT = 0.002;         // telemetry period (s)
+const CAP = 30000;              // samples kept (60 s at 500 S/s)
+const FC_MIN = 5, FC_MAX = 20;  // sine PWM carrier range in kHz (SINE_FC_MIN/MAX in dpt_params.m)
+const SPRD_MIN = Math.round(TBCLK/(2*FC_MAX*1e3)), SPRD_MAX = Math.round(TBCLK/(2*FC_MIN*1e3)); // 3750..15000 (up-down TBPRD)
+const PINS = ["A0","A1","A2","A4","A5"];
+const VREF = 3.3, FS = 4095;
+
+/* ===================== small helpers ===================== */
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function store(k, v){ try{ localStorage.setItem("dpt."+k, JSON.stringify(v)); }catch(e){} }
+function load(k, d){ try{ const v = localStorage.getItem("dpt."+k); return v==null ? d : JSON.parse(v); }catch(e){ return d; } }
+function log(s){ const el=$("#log"); const t=new Date().toLocaleTimeString(); el.textContent += `[${t}] ${s}\n`; if(el.textContent.length>20000) el.textContent = el.textContent.slice(-15000); el.scrollTop = el.scrollHeight; }
+function fmt(v, d=3){ if(!isFinite(v)) return "—"; const a=Math.abs(v); if(a>=1000) return v.toFixed(0); if(a>=100) return v.toFixed(1); if(a>=10) return v.toFixed(2); return v.toFixed(d); }
+
+/* ===================== theme ===================== */
+(function(){ const t = load("theme", null); if(t) document.documentElement.setAttribute("data-theme", t); })();
+$("#themeBtn").onclick = () => {
+  const cur = document.documentElement.getAttribute("data-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark":"light");
+  const nxt = cur === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", nxt); store("theme", nxt); drawTiming(); requestDraw();
+};
+
+/* ===================== protocol ===================== */
+// PC -> DSP: 'C' + [ctrl,t1,gap,t2,N,seq,chk] (uint16 LE) + 'E'
+function buildCmd(ctrl, t1, gap, t2, N, seq){
+  const w = [ctrl, t1, gap, t2, N, seq];
+  let s = 0x5A5A; for(const x of w) s += x;
+  w.push(s & 0xFFFF);
+  const b = new Uint8Array(16); b[0] = 0x43; // 'C'
+  w.forEach((x,i)=>{ b[1+2*i] = x & 0xFF; b[2+2*i] = (x>>8) & 0xFF; });
+  b[15] = 0x45; // 'E'
+  return b;
+}
+// DSP -> PC: 'D''T' + [status, adc0..4, chk] (uint16 LE), 16 bytes
+const rx = { buf: new Uint8Array(4096), len: 0 };
+function feed(bytes){
+  if(rx.len + bytes.length > rx.buf.length){ const nb = new Uint8Array(Math.max(rx.buf.length*2, rx.len+bytes.length)); nb.set(rx.buf.subarray(0,rx.len)); rx.buf = nb; }
+  rx.buf.set(bytes, rx.len); rx.len += bytes.length;
+  let i = 0;
+  while(rx.len - i >= 16){
+    if(rx.buf[i] !== 0x44 || rx.buf[i+1] !== 0x54){ i++; continue; }
+    const w = new Array(7);
+    for(let k=0;k<7;k++) w[k] = rx.buf[i+2+2*k] | (rx.buf[i+3+2*k] << 8);
+    let s = 0x5A5A; for(let k=0;k<6;k++) s += w[k];
+    if((s & 0xFFFF) !== w[6]){ stats.bad++; i++; continue; }
+    // adc words are 12-bit; their top nibbles (adc0..3) carry the sine PWM TBPRD
+    let sprd = 0; for(let k=0;k<4;k++) sprd |= ((w[1+k] >> 12) & 15) << (4*k);
+    onFrame(w[0], w.slice(1,6).map(x => x & 0x0FFF), sprd);
+    i += 16;
+  }
+  if(i > 0){ rx.buf.copyWithin(0, i, rx.len); rx.len -= i; }
+  if(rx.len > 2048){ rx.len = 0; } // resync on garbage
+}
+
+/* ===================== state ===================== */
+const stats = { frames:0, bad:0, bytes:0, lastRateT:performance.now(), lastRateF:0, rate:0, linkT:0 };
+const dsp = { seen:false, mode:-1, sine:-1, sprd:-1, nack:-1, burst4:-1, ackSeq:-1, bursts:0 };
+let seq = (Math.random()*60000|0) + 1000;
+let pending = null;   // {bytes, seq, tries, timer, label}
+let link = null;      // {kind:'serial'|'demo', write(bytes), close()}
+
+/* ===================== data store ===================== */
+const ch = PINS.map((p,i)=>Object.assign({ pin:p, name:["V_DC","I_L","V_DS","CH4","CH5"][i], gain:1, offset:0, unit:"V", show:true }, load("ch"+i, {})));
+const data = { raw: PINS.map(()=>new Uint16Array(CAP)), head:0, count:0, total:0, bursts:[] };
+let paused = false, holdUntil = -1;
+
+function onFrame(st, adc, sprd){
+  stats.frames++;
+  const mode = st & 3, nack = (st>>2)&1, b4 = (st>>3)&15, sine = (st>>7)&1, acc = (st>>8)&0xFF;
+  // burst counting (4-bit wrap)
+  let newBursts = 0;
+  if(dsp.burst4 >= 0) newBursts = (b4 - dsp.burst4 + 16) & 15;
+  dsp.burst4 = b4;
+  if(newBursts){ dsp.bursts += newBursts; }
+  // command acknowledge
+  if(pending){
+    if(acc === (pending.seq & 0xFF)) finishPending(true);
+    else if(dsp.nack >= 0 && nack !== dsp.nack) finishPending(false);
+  }
+  dsp.nack = nack; dsp.ackSeq = acc;
+  const firstFrame = !dsp.seen;
+  dsp.seen = true;
+  if(firstFrame || mode !== dsp.mode || sine !== dsp.sine || sprd !== dsp.sprd){ dsp.mode = mode; dsp.sine = sine; dsp.sprd = sprd; updateModeUI(); }
+  // samples
+  if(!paused){
+    const h = data.head;
+    for(let c=0;c<5;c++) data.raw[c][h] = adc[c];
+    data.head = (h+1) % CAP; data.count = Math.min(CAP, data.count+1); data.total++;
+    if(newBursts){
+      data.bursts.push(data.total-1); if(data.bursts.length>500) data.bursts.shift();
+      if($("#holdOnFire").checked && holdUntil < 0) holdUntil = data.total + Math.round(winSec()*0.5/FRAME_DT);
+    }
+    if(holdUntil >= 0 && data.total >= holdUntil){ holdUntil = -1; setPaused(true); setMsg(`Held after burst #${dsp.bursts}. Press Resume to continue.`, "ok"); }
+    requestDraw();
+  }
+}
+
+/* ===================== serial link ===================== */
+if(!("serial" in navigator)){ $("#noSerial").style.display = "block"; }
+$("#connectBtn").onclick = async () => { if(link) return disconnect(); await connectSerial(); };
+$("#demoBtn").onclick = () => { if(link) disconnect().then(startDemo); else startDemo(); };
+
+async function connectSerial(){
+  if(!("serial" in navigator)){ alertMsg("Web Serial is not available in this browser. Use Chrome or Edge."); return; }
+  let port;
+  try{ port = await navigator.serial.requestPort(); }catch(e){ return; }
+  const baud = +$("#baud").value; store("baud", baud);
+  try{ await port.open({ baudRate:baud, dataBits:8, stopBits:1, parity:"none", bufferSize:65536 }); }
+  catch(e){ alertMsg("Could not open the port: " + e.message + " (Is it used by another program, e.g. a terminal or CCS?)"); return; }
+  const writer = port.writable.getWriter();
+  let reader = null, alive = true;
+  link = {
+    kind:"serial",
+    write: async b => { try{ await writer.write(b); }catch(e){ log("write error: "+e.message); } },
+    close: async () => {
+      alive = false;
+      try{ if(reader) await reader.cancel(); }catch(e){}
+      try{ writer.releaseLock(); }catch(e){}
+      try{ await port.close(); }catch(e){}
+    }
+  };
+  port.addEventListener("disconnect", () => { log("USB device removed"); if(link) dropLink("Board unplugged"); });
+  onLinkUp(`Serial ${baud} baud`);
+  (async () => {
+    while(alive && port.readable){
+      reader = port.readable.getReader();
+      try{
+        for(;;){ const {value, done} = await reader.read(); if(done) break; if(value){ stats.bytes += value.length; feed(value); } }
+      }catch(e){ if(alive) log("read error: " + e.message); }
+      finally{ try{ reader.releaseLock(); }catch(e){} }
+    }
+  })();
+}
+async function disconnect(){
+  if(!link) return;
+  if($("#stopOnDisc").checked && (dsp.mode > 0 || dsp.sine > 0)){
+    await sendRaw(0, false, 0); await new Promise(r=>setTimeout(r,60)); await sendRaw(0, false, 0, false, true); await new Promise(r=>setTimeout(r,60));
+  }
+  const l = link; dropLink("Disconnected"); await l.close();
+}
+function dropLink(reason){
+  link = null; if(pending){ clearInterval(pending.timer); pending = null; }
+  Object.assign(dsp, { seen:false, mode:-1, sine:-1, sprd:-1, nack:-1, burst4:-1, ackSeq:-1 });
+  $("#connectBtn").textContent = "Connect…"; $("#connectBtn").classList.add("primary");
+  setPill("#pillLink", "", reason); updateModeUI(); updateButtons(); log(reason);
+}
+function onLinkUp(desc){
+  $("#connectBtn").textContent = "Disconnect"; $("#connectBtn").classList.remove("primary");
+  setPill("#pillLink", "warn", "Waiting for data…"); log("Link up: " + desc);
+  stats.bad = 0; stats.frames = 0; stats.lastRateF = 0; stats.lastRateT = performance.now(); stats.linkT = performance.now(); stats.bytes = 0;
+  updateButtons();
+  setMsg("Connected. Waiting for telemetry from the board…");
+}
+function setPill(id, cls, txt){ const p=$(id); p.className = "pill " + cls; p.querySelector("span:last-child").textContent = txt; }
+function alertMsg(s){ setMsg(s, "err"); log(s); }
+
+/* ===================== commands ===================== */
+let uiMode = 0;
+function readSettings(){
+  const t1 = Math.round(+$("#t1").value * 1e-6 * TBCLK);
+  const gap = Math.round(+$("#gap").value * 1e-6 * TBCLK);
+  const t2 = Math.round(+$("#t2").value * 1e-6 * TBCLK);
+  const N = Math.round(+$("#rep").value / TWIN_MS);
+  return { t1, gap, t2, N };
+}
+function validate(){
+  const s = readSettings(); const errs = {};
+  for(const k of ["t1","gap","t2"]){ if(!(s[k] >= MIN_CNT)) errs[k] = "Minimum 0.1 µs"; }
+  if(s.t1 + s.gap + s.t2 > MAX_SUM) errs.sum = `t1 + gap + t2 must be ≤ ${(MAX_SUM/TBCLK*1e6).toFixed(1)} µs`;
+  if(!(s.N >= 1 && s.N <= 65535)) errs.rep = "0.4 ms … 26 214 ms";
+  const set = (id, key, txt) => { const f=$(id); const e = errs[key] || (key!=="rep" && errs.sum); f.classList.toggle("bad", !!e); f.querySelector(".hint").textContent = e || txt; };
+  set("#f_t1","t1", `= ${s.t1} counts → ${(s.t1/TBCLK*1e6).toFixed(3)} µs`);
+  set("#f_gap","gap", `= ${s.gap} counts → ${(s.gap/TBCLK*1e6).toFixed(3)} µs`);
+  set("#f_t2","t2", `= ${s.t2} counts → ${(s.t2/TBCLK*1e6).toFixed(3)} µs`);
+  const repMs = s.N*TWIN_MS, duty = (s.t1+s.t2)/TBCLK/(repMs*1e-3)*100;
+  set("#f_rep","rep", `→ ${repMs.toFixed(1)} ms (${(1000/repMs).toFixed(repMs<10?0:2)} Hz), on-time duty ${duty < 0.01 ? duty.toExponential(1) : duty.toFixed(3)} %`);
+  const ok = Object.keys(errs).length === 0;
+  drawTiming();
+  return ok ? s : null;
+}
+// sine PWM switching frequency -> ePWM3 up-down TBPRD (f = TBCLK / (2*TBPRD))
+function readFsw(){
+  const prd = Math.round(TBCLK / (2 * +$("#fsw").value * 1e3));
+  const ok = prd >= SPRD_MIN && prd <= SPRD_MAX;
+  const f = $("#f_fsw"); f.classList.toggle("bad", !ok);
+  f.querySelector(".hint").textContent = ok ? `= TBPRD ${prd} → ${(TBCLK/(2*prd)/1e3).toFixed(3)} kHz, dead time 0.5 µs` : `${FC_MIN} … ${FC_MAX} kHz`;
+  return ok ? prd : null;
+}
+{ const el = $("#fsw"); el.value = load("in.fsw", el.value); el.addEventListener("input", ()=>{ store("in.fsw", el.value); readFsw(); updateButtons(); }); }
+for(const id of ["t1","gap","t2","rep"]){ const el=$("#"+id); el.value = load("in."+id, el.value); el.addEventListener("input", ()=>{ store("in."+id, el.value); validate(); updateButtons(); }); }
+$$(".seg button[data-mode]").forEach(b => b.onclick = () => { uiMode = +b.dataset.mode; $$(".seg button[data-mode]").forEach(x=>x.setAttribute("aria-pressed", x===b)); updateButtons(); });
+
+function nextSeq(){ do{ seq = (seq+1) & 0xFFFF; }while(seq===0 || (seq & 0xFF) === dsp.ackSeq); return seq; }
+// sineOn: sine PWM state the DSP should have after this command (every command carries it)
+// sineOnly: change only the sine PWM state and switching frequency (TBPRD in the t1 word),
+//           the DSP keeps its double-pulse settings
+async function sendRaw(mode, fire, sineOn, sineOnly, quiet){
+  if(!link) return;
+  const s = readSettings();
+  const ctrl = (mode & 3) | (fire ? 0x100 : 0) | (sineOn ? 0x200 : 0) | (sineOnly ? 0x400 : 0);
+  const sprd = sineOnly ? readFsw() : 0;
+  const sq = nextSeq();
+  const bytes = buildCmd(ctrl, sineOnly ? sprd : s.t1, s.gap, s.t2, Math.max(1, Math.min(65535, s.N)), sq);
+  await link.write(bytes);
+  if(!quiet) log(sineOnly ? `TX seq ${sq}: sine PWM ${sineOn?"ON":"OFF"} TBPRD=${sprd} (${(TBCLK/(2*sprd)/1e3).toFixed(3)} kHz)` : `TX seq ${sq}: mode ${mode}${fire?" FIRE":""} t1=${s.t1} gap=${s.gap} t2=${s.t2} N=${s.N} sine ${sineOn?"on":"off"}`);
+  return {bytes, sq};
+}
+async function sendCmd(mode, fire, label, sineOn = dsp.sine > 0, sineOnly = false){
+  if(!link) return;
+  if(mode !== 0 && !sineOnly && !validate()){ setMsg("Fix the highlighted values first.", "err"); return; }
+  if(sineOnly && !readFsw()){ setMsg(`Switching frequency must be ${FC_MIN} … ${FC_MAX} kHz.`, "err"); return; }
+  if(pending){ clearInterval(pending.timer); pending = null; }
+  const r = await sendRaw(mode, fire, sineOn, sineOnly);
+  pending = { bytes:r.bytes, seq:r.sq, tries:1, label, mode };
+  setMsg(`${label}: sending…`);
+  // the DSP reads its command every 2 ms without waiting, so a frame can be cut; resend until acknowledged
+  pending.timer = setInterval(async () => {
+    if(!pending || !link) return;
+    if(pending.tries >= 40){ const p = pending; clearInterval(p.timer); pending = null; setMsg(`${p.label}: no acknowledgement from the board. Check the connection.`, "err"); log("no ack for seq "+p.seq); $("#stAck").textContent = "No response"; return; }
+    pending.tries++; await link.write(pending.bytes);
+  }, 25);
+}
+function finishPending(ok){
+  const p = pending; clearInterval(p.timer); pending = null;
+  if(ok){
+    const t = `${p.label}: applied ✓` + (p.tries>1 ? ` (${p.tries} tries)` : "");
+    setMsg(t, "ok"); $("#stAck").textContent = `Applied ✓ (seq ${p.seq})`; log(`ACK seq ${p.seq} after ${p.tries} tries`);
+  }else{
+    setMsg(`${p.label}: rejected by the board (value out of range or corrupted).`, "err"); $("#stAck").textContent = "Rejected ✗"; log(`NACK seq ${p.seq}`);
+  }
+}
+$("#applyBtn").onclick = () => sendCmd(uiMode, false, uiMode===0 ? "Outputs off" : uiMode===1 ? "Continuous mode" : "Single-shot armed");
+$("#fireBtn").onclick = () => sendCmd(2, true, "Fire");
+$("#stopBtn").onclick = () => { uiMode = 0; $$(".seg button[data-mode]").forEach(x=>x.setAttribute("aria-pressed", x.dataset.mode==="0")); sendCmd(0, false, "STOP", false); };
+$("#sineBtn").onclick = () => { const on = !(dsp.sine > 0); sendCmd(Math.max(0, dsp.mode), false, on ? `Sine PWM on (${(+$("#fsw").value).toFixed(1)} kHz)` : "Sine PWM off", on, true); };
+$("#fswBtn").onclick = () => sendCmd(Math.max(0, dsp.mode), false, `Switching frequency ${(+$("#fsw").value).toFixed(1)} kHz`, dsp.sine > 0, true);
+document.addEventListener("keydown", e => { if(e.key === "Escape" && link){ e.preventDefault(); $("#stopBtn").click(); } });
+window.addEventListener("beforeunload", () => { if(link && (dsp.mode>0 || dsp.sine>0) && $("#stopOnDisc").checked){ sendRaw(0,false,0,false,true); } });
+
+function updateButtons(){
+  const ok = !!link && dsp.seen;
+  const valid = !!validate();
+  $("#applyBtn").disabled = !ok || (uiMode!==0 && !valid);
+  $("#fireBtn").disabled = !ok || dsp.mode !== 2 || !valid;
+  $("#stopBtn").disabled = !link;
+  $("#fireBtn").title = dsp.mode === 2 ? "Fire one double pulse" : "Apply Single-shot mode first";
+  const sb = $("#sineBtn");
+  const fswOk = !!readFsw();
+  sb.disabled = !ok || dsp.sine < 0 || (!(dsp.sine > 0) && !fswOk);
+  $("#fswBtn").disabled = !ok || dsp.sine < 0 || !fswOk;
+  sb.textContent = dsp.sine > 0 ? "Disable sine PWM" : "Enable sine PWM";
+  sb.className = "btn wide " + (dsp.sine > 0 ? "danger" : "primary");
+}
+function updateModeUI(){
+  const names = {0:"OFF", 1:"CONTINUOUS", 2:"SINGLE SHOT (armed)"};
+  $("#stMode").textContent = dsp.mode < 0 ? "—" : names[dsp.mode] || "?";
+  if(dsp.mode > 0) setPill("#pillMode", "armed", dsp.mode===1 ? "ARMED · continuous" : "ARMED · single shot");
+  else if(dsp.mode === 0) setPill("#pillMode", "ok", "Outputs off");
+  else setPill("#pillMode", "", "Outputs: —");
+  $("#stSine").textContent = dsp.sine < 0 ? "—" : dsp.sine ? "ON" : "OFF";
+  const fk = dsp.sprd > 0 ? (TBCLK/(2*dsp.sprd)/1e3) : NaN;
+  $("#stFsw").textContent = isFinite(fk) ? `${fk.toFixed(3)} kHz (TBPRD ${dsp.sprd})` : "—";
+  if(dsp.sine > 0) setPill("#pillSine", "armed", isFinite(fk) ? `Sine PWM on · ${fk.toFixed(1)} kHz` : "Sine PWM on");
+  else if(dsp.sine === 0) setPill("#pillSine", "ok", "Sine PWM off");
+  else setPill("#pillSine", "", "Sine PWM: —");
+  updateButtons();
+}
+function setMsg(s, cls){ const m=$("#cmdMsg"); m.className = "msg " + (cls||""); m.innerHTML = s; }
+
+/* ===================== timing preview ===================== */
+function drawTiming(){
+  const svg = $("#timing"); if(!svg) return;
+  const s = readSettings();
+  const tot = Math.max(1, s.t1 + s.gap + s.t2), pad = tot*0.15;
+  const W=340, x0=58, x1=W-8, X = c => x0 + (c+pad)/(tot+2*pad)*(x1-x0);
+  const rowsY = [18, 52, 86], h = 20;
+  const c1 = css("--pulse1"), c2 = css("--pulse2"), c3 = css("--pulseor"), ax = css("--axis");
+  const wave = (y, segs, col) => {
+    let d = `M${x0},${y+h}`; for(const [a,b] of segs){ d += ` L${X(a)},${y+h} L${X(a)},${y} L${X(b)},${y} L${X(b)},${y+h}`; } d += ` L${x1},${y+h}`;
+    return `<path d="${d}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round"/>`;
+  };
+  const us = c => (c/TBCLK*1e6);
+  const lbl = (a,b,y,t) => (X(b)-X(a) > 26) ? `<text x="${(X(a)+X(b))/2}" y="${y+h-5}" text-anchor="middle">${t}</text>` : "";
+  let g = "";
+  g += `<text x="0" y="${rowsY[0]+15}">GPIO0</text><text x="0" y="${rowsY[1]+15}">GPIO2</text><text x="0" y="${rowsY[2]+15}">OR</text>`;
+  for(const y of rowsY) g += `<line x1="${x0}" x2="${x1}" y1="${y+h}" y2="${y+h}" stroke="${ax}" stroke-width="1"/>`;
+  g += wave(rowsY[0], [[0,s.t1]], c1);
+  g += wave(rowsY[1], [[s.t1+s.gap, s.t1+s.gap+s.t2]], c2);
+  g += wave(rowsY[2], [[0,s.t1],[s.t1+s.gap, s.t1+s.gap+s.t2]], c3);
+  g += lbl(0, s.t1, rowsY[0], `${fmt(us(s.t1),2)} µs`);
+  g += lbl(s.t1+s.gap, s.t1+s.gap+s.t2, rowsY[1], `${fmt(us(s.t2),2)} µs`);
+  if(X(s.t1+s.gap)-X(s.t1) > 30) g += `<text x="${(X(s.t1)+X(s.t1+s.gap))/2}" y="${rowsY[2]+h+13}" text-anchor="middle">gap ${fmt(us(s.gap),2)} µs</text>`;
+  svg.innerHTML = g;
+}
+
+/* ===================== channel table ===================== */
+function buildTable(){
+  const tb = $("#chTable tbody"); tb.innerHTML = "";
+  ch.forEach((c,i) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><label class="chk"><input type="checkbox" ${c.show?"checked":""} data-k="show"><span class="sw" style="background:var(--s${i+1})"></span></label></td>
+      <td>${c.pin}</td><td><input type="text" value="${c.name}" data-k="name" aria-label="Name ${c.pin}"></td>
+      <td><input type="number" step="any" value="${c.gain}" data-k="gain" aria-label="Gain ${c.pin}"></td>
+      <td><input type="number" step="any" value="${c.offset}" data-k="offset" aria-label="Offset ${c.pin}"></td>
+      <td><input type="text" value="${c.unit}" data-k="unit" style="min-width:44px;width:56px" aria-label="Unit ${c.pin}"></td>
+      <td class="num" id="now${i}">—</td><td class="num" id="min${i}">—</td><td class="num" id="max${i}">—</td><td class="num" id="mean${i}">—</td>`;
+    tr.querySelectorAll("input").forEach(inp => inp.addEventListener("input", () => {
+      const k = inp.dataset.k;
+      c[k] = k==="show" ? inp.checked : (k==="gain"||k==="offset") ? (parseFloat(inp.value)||0) : inp.value;
+      if(k==="gain" && inp.value.trim()==="") c.gain = 1;
+      store("ch"+i, c); buildLegend(); requestDraw();
+    }));
+    tb.appendChild(tr);
+  });
+  buildLegend();
+}
+function buildLegend(){
+  $("#legend").innerHTML = ch.map((c,i)=> c.show ? `<span><span class="sw" style="background:var(--s${i+1})"></span>${escapeHtml(c.name)}</span>` : "").join("");
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m])); }
+const toVolt = r => r * VREF / FS;
+const toEng = (i, r) => toVolt(r) * ch[i].gain + ch[i].offset;
+
+/* ===================== chart ===================== */
+const cv = $("#chart"), ctx = cv.getContext("2d");
+let view = load("view","stack"), drawQueued = false, hoverX = null;
+$$(".seg button[data-view]").forEach(b => { b.setAttribute("aria-pressed", b.dataset.view===view); b.onclick = () => { view = b.dataset.view; store("view", view); $$(".seg button[data-view]").forEach(x=>x.setAttribute("aria-pressed", x===b)); requestDraw(); }; });
+$("#win").value = String(load("win", "2")); $("#win").onchange = () => { store("win", $("#win").value); requestDraw(); };
+const winSec = () => +$("#win").value;
+function setPaused(p){ paused = p; $("#pauseBtn").textContent = p ? "Resume" : "Pause"; if(!p){ holdUntil = -1; } requestDraw(); }
+$("#pauseBtn").onclick = () => setPaused(!paused);
+$("#clearBtn").onclick = () => { data.head=0; data.count=0; data.total=0; data.bursts=[]; holdUntil=-1; requestDraw(); };
+function requestDraw(){ if(!drawQueued){ drawQueued = true; requestAnimationFrame(draw); } }
+new ResizeObserver(requestDraw).observe($("#chartwrap"));
+
+function niceTicks(lo, hi, n){
+  const span = hi - lo || 1, step0 = span / n, mag = Math.pow(10, Math.floor(Math.log10(step0)));
+  const step = [1,2,2.5,5,10].map(m=>m*mag).find(s => span/s <= n) || 10*mag;
+  const ticks = []; for(let v = Math.ceil(lo/step)*step; v <= hi + 1e-9; v += step) ticks.push(+v.toFixed(10));
+  return ticks;
+}
+// returns visible samples range [i0, n) in "age" order oldest->newest as indices into ring
+function visible(){
+  const n = Math.min(data.count, Math.round(winSec()/FRAME_DT));
+  return { n, first: data.total - n };
+}
+const ringIdx = absIdx => ((data.head - (data.total - absIdx)) % CAP + CAP) % CAP;
+
+function draw(){
+  drawQueued = false;
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if(cv.width !== Math.round(W*dpr) || cv.height !== Math.round(H*dpr)){ cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr); }
+  ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
+  const vis = visible();
+  $("#chartMsg").style.display = data.count ? "none" : "flex";
+  const shown = ch.map((c,i)=>i).filter(i=>ch[i].show);
+  updateStats(vis);
+  if(!data.count || !shown.length) return;
+  const gridC = css("--grid"), axisC = css("--axis"), mutedC = css("--muted"), textC = css("--text-2");
+  const L = 64, R = 12, T = 8, B = 26;
+  const plotW = W - L - R;
+  const winN = Math.round(winSec()/FRAME_DT);
+  const xOf = abs => L + plotW * (1 - (data.total - 1 - abs) / Math.max(1, winN - 1));
+  const panels = view === "overlay" ? [shown] : shown.map(i=>[i]);
+  const gap = 10, ph = (H - T - B - gap*(panels.length-1)) / panels.length;
+  ctx.font = "11px system-ui,-apple-system,Segoe UI,sans-serif"; ctx.textBaseline = "middle";
+  panels.forEach((chs, pi) => {
+    const y0 = T + pi*(ph+gap), y1 = y0 + ph;
+    // y-range
+    let lo, hi;
+    if(view === "overlay"){ lo = 0; hi = VREF; }
+    else{
+      lo = Infinity; hi = -Infinity;
+      for(let k=0;k<vis.n;k++){ const r = data.raw[chs[0]][ringIdx(vis.first+k)]; const v = toEng(chs[0], r); if(v<lo) lo=v; if(v>hi) hi=v; }
+      if(!isFinite(lo)){ lo=0; hi=1; }
+      const minSpan = 0.05 * Math.abs(ch[chs[0]].gain || 1);           // never zoom below 50 mV at the pin
+      if(hi - lo < minSpan){ const c = (hi+lo)/2; lo = c - minSpan/2; hi = c + minSpan/2; }
+      const m = (hi-lo)*0.12; lo -= m; hi += m;
+    }
+    const yOf = v => y1 - (v - lo)/(hi - lo)*ph;
+    // grid + y ticks
+    const ticks = niceTicks(lo, hi, Math.max(2, Math.floor(ph/38)));
+    ctx.strokeStyle = gridC; ctx.lineWidth = 1; ctx.fillStyle = mutedC; ctx.textAlign = "right";
+    for(const t of ticks){ const y = Math.round(yOf(t))+0.5; ctx.beginPath(); ctx.moveTo(L,y); ctx.lineTo(W-R,y); ctx.stroke(); ctx.fillText(fmt(t, 3), L-6, y); }
+    ctx.strokeStyle = axisC; ctx.beginPath(); ctx.moveTo(L, Math.round(y1)+0.5); ctx.lineTo(W-R, Math.round(y1)+0.5); ctx.stroke();
+    // panel label
+    ctx.save(); ctx.translate(12, (y0+y1)/2); ctx.rotate(-Math.PI/2); ctx.textAlign = "center"; ctx.fillStyle = textC;
+    ctx.fillText(view==="overlay" ? "pin voltage (V)" : `${ch[chs[0]].name} (${ch[chs[0]].unit})`, 0, 0); ctx.restore();
+    // burst markers
+    ctx.save(); ctx.strokeStyle = css("--critical"); ctx.globalAlpha = .55; ctx.setLineDash([4,4]);
+    for(const b of data.bursts){ if(b < vis.first) continue; const x = Math.round(xOf(b))+0.5; ctx.beginPath(); ctx.moveTo(x,y0); ctx.lineTo(x,y1); ctx.stroke(); }
+    ctx.restore();
+    // series (min/max per pixel column when dense)
+    ctx.save(); ctx.beginPath(); ctx.rect(L, y0, plotW, ph); ctx.clip();
+    for(const c of chs){
+      ctx.strokeStyle = css(`--s${c+1}`); ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.beginPath();
+      const val = k => { const r = data.raw[c][ringIdx(vis.first+k)]; return view==="overlay" ? toVolt(r) : toEng(c, r); };
+      if(vis.n > plotW*2){
+        let col = -1, mn=0, mx=0, first = true;
+        for(let k=0;k<vis.n;k++){
+          const x = Math.floor(xOf(vis.first+k)), v = val(k);
+          if(x !== col){ if(col>=0){ const ya=yOf(mx), yb=yOf(mn); if(first){ctx.moveTo(col,ya); first=false;} else ctx.lineTo(col,ya); ctx.lineTo(col,yb);} col = x; mn = mx = v; }
+          else { if(v<mn) mn=v; if(v>mx) mx=v; }
+        }
+        if(col>=0){ ctx.lineTo(col, yOf(mx)); ctx.lineTo(col, yOf(mn)); }
+      }else{
+        for(let k=0;k<vis.n;k++){ const x = xOf(vis.first+k), y = yOf(val(k)); k ? ctx.lineTo(x,y) : ctx.moveTo(x,y); }
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+    // crosshair
+    if(hoverX !== null && hoverX >= L && hoverX <= W-R){ ctx.strokeStyle = axisC; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(Math.round(hoverX)+0.5, y0); ctx.lineTo(Math.round(hoverX)+0.5, y1); ctx.stroke(); }
+  });
+  // x axis (seconds before now)
+  ctx.fillStyle = mutedC; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  const span = winSec(), xt = niceTicks(-span, 0, Math.max(2, Math.floor(plotW/90)));
+  for(const t of xt){ const x = L + plotW*(1 + t/span); ctx.fillText((t===0? "0" : fmt(t,2)) + (t===0? " s" : ""), x, H-8); }
+  if(paused){ ctx.fillStyle = textC; ctx.textAlign = "right"; ctx.fillText("PAUSED", W-R, H-8); }
+  drawTip(vis, L, plotW, winN);
+}
+function drawTip(vis, L, plotW, winN){
+  const tip = $("#tip");
+  if(hoverX === null || !data.count || hoverX < L){ tip.style.display = "none"; return; }
+  const ageFromEnd = Math.round((1 - (hoverX - L)/plotW) * (winN - 1));
+  const abs = data.total - 1 - ageFromEnd;
+  if(abs < vis.first || abs >= data.total){ tip.style.display = "none"; return; }
+  const ri = ringIdx(abs);
+  const rows = ch.map((c,i)=> c.show ? `<div class="r"><span><span class="sw" style="background:var(--s${i+1})"></span>${escapeHtml(c.name)}</span><b>${fmt(toEng(i, data.raw[i][ri]))} ${escapeHtml(c.unit)}</b></div>` : "").join("");
+  tip.innerHTML = `<div class="t">${(-(ageFromEnd*FRAME_DT)).toFixed(3)} s</div>${rows}`;
+  tip.style.display = "block";
+  const wrap = $("#chartwrap").getBoundingClientRect(), tw = tip.offsetWidth;
+  tip.style.left = (hoverX + 14 + tw > wrap.width ? hoverX - tw - 14 : hoverX + 14) + "px";
+  tip.style.top = "10px";
+}
+cv.addEventListener("mousemove", e => { const r = cv.getBoundingClientRect(); hoverX = e.clientX - r.left; requestDraw(); });
+cv.addEventListener("mouseleave", () => { hoverX = null; requestDraw(); });
+
+function updateStats(vis){
+  for(let i=0;i<5;i++){
+    if(!data.count){ ["now","min","max","mean"].forEach(k=>$("#"+k+i).textContent="—"); continue; }
+    let mn=Infinity, mx=-Infinity, sum=0;
+    for(let k=0;k<vis.n;k++){ const v = toEng(i, data.raw[i][ringIdx(vis.first+k)]); if(v<mn) mn=v; if(v>mx) mx=v; sum+=v; }
+    const now = toEng(i, data.raw[i][ringIdx(data.total-1)]);
+    $("#now"+i).textContent = fmt(now); $("#min"+i).textContent = fmt(mn); $("#max"+i).textContent = fmt(mx); $("#mean"+i).textContent = fmt(sum/Math.max(1,vis.n));
+  }
+}
+
+/* ===================== CSV ===================== */
+$("#csvBtn").onclick = () => {
+  if(!data.count){ setMsg("Nothing to save yet.", "err"); return; }
+  const n = data.count, first = data.total - n, bset = new Set(data.bursts);
+  const head = ["t_s", ...ch.map(c=>`${c.name}_${c.unit}`), ...ch.map(c=>`${c.pin}_raw`), "burst"].join(",");
+  const lines = [head];
+  for(let k=0;k<n;k++){
+    const abs = first+k, ri = ringIdx(abs);
+    const eng = ch.map((c,i)=> toEng(i, data.raw[i][ri]).toPrecision(6));
+    const raw = ch.map((c,i)=> data.raw[i][ri]);
+    lines.push([(k*FRAME_DT).toFixed(3), ...eng, ...raw, bset.has(abs)?1:0].join(","));
+  }
+  const blob = new Blob([lines.join("\n")], {type:"text/csv"});
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = `dpt_adc_${new Date().toISOString().replace(/[:.]/g,"-").slice(0,19)}.csv`; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+};
+
+/* ===================== telemetry rate / link watchdog ===================== */
+setInterval(() => {
+  const now = performance.now(), dt = (now - stats.lastRateT)/1000;
+  stats.rate = (stats.frames - stats.lastRateF) / dt; stats.lastRateF = stats.frames; stats.lastRateT = now;
+  $("#stRate").textContent = link ? `${stats.rate.toFixed(0)} frames/s` : "—";
+  $("#stBad").textContent = stats.bad;
+  $("#stBytes").textContent = link && link.kind === "serial" ? stats.bytes : "—";
+  $("#stBursts").textContent = dsp.bursts;
+  if(link){
+    if(stats.rate > 50) setPill("#pillLink", "ok", link.kind==="demo" ? "Demo running" : "Connected");
+    else setPill("#pillLink", "warn", dsp.seen ? "No data (check board)" : "Waiting for data…");
+    if(stats.rate < 1 && dsp.seen){ dsp.seen = false; updateButtons(); }
+    if(stats.rate > 1 && !dsp.seen){ dsp.seen = true; updateButtons(); }
+    if(dsp.seen && $("#cmdMsg").textContent.startsWith("Connected. Waiting")) setMsg("Receiving telemetry. Set the timing and press <b>Apply</b>.", "ok");
+    if(!dsp.seen && link.kind === "serial" && performance.now() - stats.linkT > 2500){
+      if(stats.bytes === 0)
+        setMsg(`<b>Apply</b> is disabled: <b>no bytes at all</b> are arriving on this port. Either this is the wrong COM port (pick <b>XDS110 Class Application/User UART</b>), another program (MATLAB, a terminal, CCS) is using it, or the board firmware is not running (green LED5 should blink).`, "err");
+      else
+        setMsg(`<b>Apply</b> is disabled: ${stats.bytes} bytes arrived but none form a valid frame. This is almost always a <b>baud-rate mismatch</b> – select <b>230400</b> (now ${$("#baud").value}), then Disconnect and Connect again.`, "err");
+    }
+  }
+}, 1000);
+
+/* ===================== demo board (simulated DSP, same protocol) ===================== */
+function startDemo(){
+  const sim = { P:[0,750,1050,1350,250,0,0], last:null, acc:0, nk:0, se:0, sp:SPRD_MIN, bc:0, cnt:0, lastSeq:0, t:0, rxq:[], vbus:300, il:0, sag:0 };
+  let timer;
+  const handleCmd = b => {
+    const w = []; for(let i=0;i<7;i++) w.push(b[1+2*i] | (b[2+2*i]<<8));
+    const key = w.join(","); if(key === sim.last) return; sim.last = key;
+    let s = 0x5A5A; for(let i=0;i<6;i++) s+=w[i];
+    const mode = w[0]&3, fr = (w[0]>>8)&1, son = (w[0]>>9)&1, sonly = (w[0]>>10)&1, sum = w[1]+w[2]+w[3];
+    const ok = (s&0xFFFF)===w[6] && (sonly ? (w[1]>=SPRD_MIN && w[1]<=SPRD_MAX) : (mode<=2 && w[1]>=15 && w[2]>=15 && w[3]>=15 && sum<=PRD-150 && w[4]>=1));
+    if(ok){ if(sonly) sim.sp=w[1]; else sim.P=[mode,w[1],w[1]+w[2],sum,w[4],w[5],fr]; sim.se=son; sim.acc=w[5]; } else sim.nk^=1;
+  };
+  link = {
+    kind:"demo",
+    write: async b => {
+      // emulate the DSP dropping ~35 % of command frames (non-blocking 2 ms read)
+      if(Math.random() < 0.35) return;
+      if(b.length===16 && b[0]===0x43 && b[15]===0x45) handleCmd(b);
+    },
+    close: async () => clearInterval(timer)
+  };
+  onLinkUp("Demo (simulated board)");
+  let acc = 0, last = performance.now();
+  timer = setInterval(() => {
+    const now = performance.now(); acc += (now - last); last = now;
+    const out = [];
+    while(acc >= 2){
+      acc -= 2;
+      // 5 ISR ticks (400 us) per telemetry frame
+      for(let k=0;k<5;k++){
+        const P = sim.P, newCmd = P[5] !== sim.lastSeq; sim.lastSeq = P[5];
+        let fire = false;
+        if(P[0]===1){ fire = sim.cnt===0; sim.cnt++; if(sim.cnt>=P[4]) sim.cnt=0; }
+        else if(P[0]===2){ fire = newCmd && P[6]!==0; sim.cnt=0; } else sim.cnt=0;
+        if(fire){ sim.bc=(sim.bc+1)&0xFFFF; sim.sag += (P[1]+(P[3]-P[2]))/TBCLK*1e6*0.6; sim.il = (P[1]/TBCLK*1e6)*4; }
+      }
+      sim.t += 0.002; sim.sag *= 0.985; sim.il *= 0.96;
+      const vbus = (sim.vbus - sim.sag)/100;              // 100:1 divider at A0
+      const adcV = [vbus, 1.65 + sim.il*0.02, 0.4+0.05*Math.sin(sim.t*2*Math.PI*3), 1.2+0.3*Math.sin(sim.t*2*Math.PI*0.5), 2.5];
+      const st = (sim.P[0]&3) | (sim.nk<<2) | ((sim.bc&15)<<3) | (sim.se<<7) | ((sim.acc&0xFF)<<8);
+      const w = [0x5444, st, ...adcV.map((v,k) => Math.max(0, Math.min(4095, Math.round(v/VREF*FS + (Math.random()-0.5)*6))) | (k<4 ? ((sim.sp >> (4*k)) & 15) << 12 : 0))];
+      let s = 0x5A5A; for(let i=1;i<7;i++) s += w[i]; w.push(s & 0xFFFF);
+      for(const x of w){ out.push(x & 0xFF, (x>>8)&0xFF); }
+    }
+    if(out.length) feed(Uint8Array.from(out));
+  }, 20);
+  if(!load("demoGains", false)){ ch[0].gain = 100; ch[0].name="V_DC"; store("ch0", ch[0]); store("demoGains", true); buildTable(); }
+}
+
+/* ===================== init ===================== */
+$("#baud").value = String(load("baud", 230400));
+$("#baud").onchange = () => { store("baud", +$("#baud").value); if(link && link.kind==="serial") setMsg("Baud rate changed: press <b>Disconnect</b>, then <b>Connect…</b> again to use it.", "err"); };
+buildTable(); validate(); updateModeUI(); updateButtons(); requestDraw();
+</script>
+</body>
+</html>
